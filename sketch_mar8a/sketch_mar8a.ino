@@ -2,7 +2,6 @@
 #include <WebSocketsClient.h>
 
 const char* ssid = "Convergys_2.4G";
-
 const char* password = "MyCoffeeBreak2298!";
 
 WebSocketsClient webSocket;
