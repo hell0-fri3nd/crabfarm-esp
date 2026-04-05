@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Water Quality Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
+        .card { border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .sensor-value { font-size: 2rem; font-weight: bold; }
+        .sensor-value-- { color: #999; }
+        .badge-online { background-color: #28a745; }
+        .badge-offline { background-color: #dc3545; }
+        .btn-test { background: linear-gradient(45deg, #28a745, #20c997); border: none; padding: 12px 30px; font-size: 1.2rem; }
+        .btn-test:hover { transform: scale(1.02); }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <div class="card text-center mb-4">
+            <div class="card-body">
+                <h1 class="display-5 fw-bold">Water Quality Monitor</h1>
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <div>
+                        <span class="badge bg-secondary" id="wsStatus">Connecting...</span>
+                    </div>
+                    <div>
+                        <small class="text-muted" id="lastUpdate">--:--:--</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4 mb-4">
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h5>Dissolved Oxygen</h5>
+                        <div class="sensor-value" id="doVal">--</div>
+                        <small>mg/L</small>
+                        <div class="mt-2"><small>Temp: <span id="tempVal">--</span> C</small></div>
+                        <div><small>Comp DO: <span id="compDoVal">--</span> mg/L</small></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h5>pH Level</h5>
+                        <div class="sensor-value" id="phVal">--</div>
+                        <small>pH</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h5>TDS</h5>
+                        <div class="sensor-value" id="tdsVal">--</div>
+                        <small>ppm</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h5>Turbidity</h5>
+                        <div class="sensor-value" id="turbVal">--</div>
+                        <small>NTU</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h5>Ammonium</h5>
+                        <div class="sensor-value" id="nh4Val">--</div>
+                        <small>mg/L</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h5>Weight</h5>
+                        <div class="sensor-value" id="weightVal">--</div>
+                        <small>grams</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <h5>Water Level</h5>
+                        <div class="sensor-value" id="wlVal">--</div>
+                        <small>cm</small>
+                        <div class="progress mt-2">
+                            <div class="progress-bar bg-info" id="wlProgress" style="width:0%"></div>
+                        </div>
+                        <div><small>Water Detected: <span id="waterDetect">No</span></small></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card text-center mb-4">
+            <div class="card-body">
+                <button class="btn btn-test btn-lg" id="startTestBtn" onclick="startTest()">
+                    START TESTING
+                </button>
+                <div id="testStatus" class="mt-3"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">Last 5 Test Records</h5>
+            </div>
+            <div class="card-body" id="recordsContainer">
+                <div class="text-center text-muted">No records yet</div>
+            </div>
+        </div>
+
+        <div class="text-center mt-4">
+            <small class="text-white-50">ESP32 Calibration: <a href="http://192.168.18.174" target="_blank">http://192.168.18.174</a></small>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let reconnectAttempts = 0;
+        
+        function connectWebSocket() {
+            const wsUrl = `ws://${window.location.hostname}:8080/ws`;
+            console.log(`Connecting to WebSocket: ${wsUrl}`);
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log("WebSocket connected successfully");
+                document.getElementById('wsStatus').innerHTML = 'Connected';
+                document.getElementById('wsStatus').className = 'badge bg-success';
+                reconnectAttempts = 0;
+            };
+            
+            ws.onclose = (event) => {
+                console.log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+                document.getElementById('wsStatus').innerHTML = 'Disconnected';
+                document.getElementById('wsStatus').className = 'badge bg-danger';
+                
+                reconnectAttempts++;
+                let delay = Math.min(5000, 1000 * reconnectAttempts);
+                console.log(`Reconnecting in ${delay/1000} seconds...`);
+                setTimeout(connectWebSocket, delay);
+            };
+            
+            ws.onerror = (error) => {
+                console.error("WebSocket error:", error);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log("Received data:", data.type);
+                    
+                    if (data.type === 'init') {
+                        updateSensors(data.data);
+                        updateRecords(data.records);
+                    } else if (data.type === 'sensor_update') {
+                        updateSensors(data.data);
+                        document.getElementById('lastUpdate').textContent = data.timestamp;
+                    } else if (data.type === 'new_record') {
+                        updateRecords(data.records);
+                        document.getElementById('testStatus').innerHTML = '<div class="alert alert-success">Test complete! New record saved.</div>';
+                        setTimeout(() => { document.getElementById('testStatus').innerHTML = ''; }, 5000);
+                    } else if (data.type === 'test_started') {
+                        console.log("Test started confirmation received");
+                    }
+                } catch (e) {
+                    console.error("Error parsing message:", e);
+                }
+            };
+        }
+        
+        function formatValue(value, decimals = 2) {
+            if (value === null || value === undefined || value === -1) {
+                return '--';
+            }
+            return value.toFixed(decimals);
+        }
+        
+        function updateSensors(data) {
+            // DO
+            if (data.do === -1) {
+                document.getElementById('doVal').innerHTML = '--';
+                document.getElementById('doVal').className = 'sensor-value sensor-value--';
+            } else {
+                document.getElementById('doVal').innerHTML = data.do.toFixed(2);
+                document.getElementById('doVal').className = 'sensor-value';
+            }
+            
+            // Temperature
+            if (data.temperature === -1) {
+                document.getElementById('tempVal').innerHTML = '--';
+            } else {
+                document.getElementById('tempVal').innerHTML = data.temperature.toFixed(1);
+            }
+            
+            // Compensated DO
+            if (data.compensated_do === -1) {
+                document.getElementById('compDoVal').innerHTML = '--';
+            } else {
+                document.getElementById('compDoVal').innerHTML = data.compensated_do.toFixed(2);
+            }
+            
+            // pH
+            if (data.ph === -1) {
+                document.getElementById('phVal').innerHTML = '--';
+                document.getElementById('phVal').className = 'sensor-value sensor-value--';
+            } else {
+                document.getElementById('phVal').innerHTML = data.ph.toFixed(2);
+                document.getElementById('phVal').className = 'sensor-value';
+            }
+            
+            // TDS
+            if (data.tds === -1) {
+                document.getElementById('tdsVal').innerHTML = '--';
+                document.getElementById('tdsVal').className = 'sensor-value sensor-value--';
+            } else {
+                document.getElementById('tdsVal').innerHTML = Math.round(data.tds);
+                document.getElementById('tdsVal').className = 'sensor-value';
+            }
+            
+            // Turbidity
+            if (data.turbidity === -1) {
+                document.getElementById('turbVal').innerHTML = '--';
+                document.getElementById('turbVal').className = 'sensor-value sensor-value--';
+            } else {
+                document.getElementById('turbVal').innerHTML = Math.round(data.turbidity);
+                document.getElementById('turbVal').className = 'sensor-value';
+            }
+            
+            // Ammonium
+            if (data.ammonium === -1) {
+                document.getElementById('nh4Val').innerHTML = '--';
+                document.getElementById('nh4Val').className = 'sensor-value sensor-value--';
+            } else {
+                document.getElementById('nh4Val').innerHTML = data.ammonium.toFixed(2);
+                document.getElementById('nh4Val').className = 'sensor-value';
+            }
+            
+            // Weight
+            if (data.weight === -1) {
+                document.getElementById('weightVal').innerHTML = '--';
+                document.getElementById('weightVal').className = 'sensor-value sensor-value--';
+            } else {
+                document.getElementById('weightVal').innerHTML = data.weight.toFixed(1);
+                document.getElementById('weightVal').className = 'sensor-value';
+            }
+            
+            // Water Level
+            if (data.water_level === -1) {
+                document.getElementById('wlVal').innerHTML = '--';
+                document.getElementById('wlVal').className = 'sensor-value sensor-value--';
+            } else {
+                document.getElementById('wlVal').innerHTML = data.water_level.toFixed(1);
+                document.getElementById('wlVal').className = 'sensor-value';
+            }
+            
+            document.getElementById('wlProgress').style.width = data.water_percent + '%';
+            document.getElementById('waterDetect').innerHTML = data.water_detected ? '<span class="badge bg-success">YES</span>' : '<span class="badge bg-secondary">No</span>';
+        }
+        
+        function updateRecords(records) {
+            const container = document.getElementById('recordsContainer');
+            if (!records || records.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted">No records yet</div>';
+                return;
+            }
+            
+            let html = '<div class="table-responsive"><table class="table table-sm">';
+            html += '<thead><tr><th>Time</th><th>DO</th><th>Temp</th><th>pH</th><th>TDS</th><th>Turb</th><th>NH4</th><th>Weight</th><th>Water</th></tr></thead><tbody>';
+            
+            records.forEach(rec => {
+                let time = rec.timestamp.split('T')[1] || rec.timestamp;
+                let doVal = rec.do === -1 ? '--' : rec.do.toFixed(2);
+                let tempVal = rec.temperature === -1 ? '--' : rec.temperature.toFixed(1);
+                let phVal = rec.ph === -1 ? '--' : rec.ph.toFixed(2);
+                let tdsVal = rec.tds === -1 ? '--' : Math.round(rec.tds);
+                let turbVal = rec.turbidity === -1 ? '--' : Math.round(rec.turbidity);
+                let nh4Val = rec.ammonium === -1 ? '--' : rec.ammonium.toFixed(2);
+                let weightVal = rec.weight === -1 ? '--' : rec.weight.toFixed(1);
+                let wlVal = rec.water_level === -1 ? '--' : rec.water_level.toFixed(1);
+                
+                html += `<tr>
+                    <td><small>${time.substring(0,8)}</small></td>
+                    <td>${doVal}</td>
+                    <td>${tempVal}</td>
+                    <td>${phVal}</td>
+                    <td>${tdsVal}</td>
+                    <td>${turbVal}</td>
+                    <td>${nh4Val}</td>
+                    <td>${weightVal}</td>
+                    <td>${wlVal}</td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+        
+        async function startTest() {
+            const btn = document.getElementById('startTestBtn');
+            btn.disabled = true;
+            btn.innerHTML = 'Testing...';
+            document.getElementById('testStatus').innerHTML = '<div class="alert alert-info">Test started! Follow the sequence...</div>';
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: 'start_test'}));
+                console.log("Start test command sent");
+            } else {
+                console.error("WebSocket not connected");
+                document.getElementById('testStatus').innerHTML = '<div class="alert alert-danger">Cannot start test: ESP32 not connected!</div>';
+            }
+            
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = 'START TESTING';
+            }, 3000);
+        }
+        
+        // Check WebSocket connection status periodically
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                document.getElementById('wsStatus').innerHTML = 'Connected';
+                document.getElementById('wsStatus').className = 'badge bg-success';
+            } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+                document.getElementById('wsStatus').innerHTML = 'Connecting...';
+                document.getElementById('wsStatus').className = 'badge bg-warning';
+            } else {
+                document.getElementById('wsStatus').innerHTML = 'Disconnected';
+                document.getElementById('wsStatus').className = 'badge bg-danger';
+            }
+        }, 1000);
+        
+        window.onload = () => {
+            console.log("Page loaded, connecting to WebSocket...");
+            connectWebSocket();
+        };
+    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+</body>
+</html>
