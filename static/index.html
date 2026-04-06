@@ -14,19 +14,31 @@
         .badge-offline { background-color: #dc3545; }
         .btn-test { background: linear-gradient(45deg, #28a745, #20c997); border: none; padding: 12px 30px; font-size: 1.2rem; }
         .btn-test:hover { transform: scale(1.02); }
+        .btn-test:disabled { opacity: 0.5; cursor: not-allowed; }
+        .progress { height: 25px; }
+        .progress-bar { transition: width 0.5s ease; }
+        .table-responsive { max-height: 400px; overflow-y: auto; }
+        .status-indicator { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-online { background-color: #28a745; box-shadow: 0 0 5px #28a745; }
+        .status-offline { background-color: #dc3545; }
+        .status-connecting { background-color: #ffc107; }
     </style>
 </head>
 <body>
     <div class="container py-4">
         <div class="card text-center mb-4">
             <div class="card-body">
-                <h1 class="display-5 fw-bold">Water Quality Monitor</h1>
+                <h1 class="display-5 fw-bold">🌊 Water Quality Monitor</h1>
                 <div class="d-flex justify-content-between align-items-center mt-3">
                     <div>
+                        <span id="wsStatusIndicator" class="status-indicator status-offline"></span>
                         <span class="badge bg-secondary" id="wsStatus">Connecting...</span>
                     </div>
                     <div>
                         <small class="text-muted" id="lastUpdate">--:--:--</small>
+                    </div>
+                    <div>
+                        <small class="text-muted">ESP32: <span id="esp32Status">Unknown</span></small>
                     </div>
                 </div>
             </div>
@@ -36,18 +48,18 @@
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">
                     <div class="card-body text-center">
-                        <h5>Dissolved Oxygen</h5>
+                        <h5>💧 Dissolved Oxygen</h5>
                         <div class="sensor-value" id="doVal">--</div>
                         <small>mg/L</small>
-                        <div class="mt-2"><small>Temp: <span id="tempVal">--</span> C</small></div>
-                        <div><small>Comp DO: <span id="compDoVal">--</span> mg/L</small></div>
+                        <div class="mt-2"><small>🌡️ Temp: <span id="tempVal">--</span> °C</small></div>
+                        <div><small>📊 Comp DO: <span id="compDoVal">--</span> mg/L</small></div>
                     </div>
                 </div>
             </div>
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">
                     <div class="card-body text-center">
-                        <h5>pH Level</h5>
+                        <h5>🧪 pH Level</h5>
                         <div class="sensor-value" id="phVal">--</div>
                         <small>pH</small>
                     </div>
@@ -56,7 +68,7 @@
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">
                     <div class="card-body text-center">
-                        <h5>TDS</h5>
+                        <h5>💦 TDS</h5>
                         <div class="sensor-value" id="tdsVal">--</div>
                         <small>ppm</small>
                     </div>
@@ -65,7 +77,7 @@
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">
                     <div class="card-body text-center">
-                        <h5>Turbidity</h5>
+                        <h5>🌊 Turbidity</h5>
                         <div class="sensor-value" id="turbVal">--</div>
                         <small>NTU</small>
                     </div>
@@ -74,7 +86,7 @@
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">
                     <div class="card-body text-center">
-                        <h5>Ammonium</h5>
+                        <h5>🧪 Ammonium</h5>
                         <div class="sensor-value" id="nh4Val">--</div>
                         <small>mg/L</small>
                     </div>
@@ -83,7 +95,7 @@
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">
                     <div class="card-body text-center">
-                        <h5>Weight</h5>
+                        <h5>⚖️ Weight</h5>
                         <div class="sensor-value" id="weightVal">--</div>
                         <small>grams</small>
                     </div>
@@ -92,13 +104,13 @@
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">
                     <div class="card-body text-center">
-                        <h5>Water Level</h5>
+                        <h5>📏 Water Level</h5>
                         <div class="sensor-value" id="wlVal">--</div>
                         <small>cm</small>
                         <div class="progress mt-2">
-                            <div class="progress-bar bg-info" id="wlProgress" style="width:0%"></div>
+                            <div class="progress-bar bg-info" id="wlProgress" style="width:0%">0%</div>
                         </div>
-                        <div><small>Water Detected: <span id="waterDetect">No</span></small></div>
+                        <div class="mt-2"><small>💧 Water Detected: <span id="waterDetect">No</span></small></div>
                     </div>
                 </div>
             </div>
@@ -106,16 +118,26 @@
 
         <div class="card text-center mb-4">
             <div class="card-body">
-                <button class="btn btn-test btn-lg" id="startTestBtn" onclick="startTest()">
-                    START TESTING
-                </button>
+                <div class="d-flex gap-3 justify-content-center">
+                    <button class="btn btn-test btn-lg" id="startTestBtn" onclick="startTest()">
+                        🚀 START TESTING
+                    </button>
+                    <button class="btn btn-danger btn-lg" id="cancelTestBtn" onclick="cancelTest()" style="display: none;">
+                        🛑 CANCEL TEST
+                    </button>
+                </div>
                 <div id="testStatus" class="mt-3"></div>
+                <div id="testProgress" class="mt-2" style="display: none;">
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="testProgressBar" style="width: 0%">0%</div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <div class="card">
             <div class="card-header bg-dark text-white">
-                <h5 class="mb-0">Last 5 Test Records</h5>
+                <h5 class="mb-0">📋 Last 5 Test Records</h5>
             </div>
             <div class="card-body" id="recordsContainer">
                 <div class="text-center text-muted">No records yet</div>
@@ -123,64 +145,206 @@
         </div>
 
         <div class="text-center mt-4">
-            <small class="text-white-50">ESP32 Calibration: <a href="http://192.168.18.174" target="_blank">http://192.168.18.174</a></small>
+            <small class="text-white-50">🔧 ESP32 Calibration Panel: <a href="http://192.168.18.174" target="_blank" style="color: white;">http://192.168.18.174</a></small>
         </div>
     </div>
 
     <script>
         let ws;
         let reconnectAttempts = 0;
+        let testStartTime = null;
+        let testInterval = null;
+        let testActive = false;
         
         function connectWebSocket() {
             const wsUrl = `ws://${window.location.hostname}:8080/ws`;
-            console.log(`Connecting to WebSocket: ${wsUrl}`);
+            console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
             
             ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
-                console.log("WebSocket connected successfully");
+                console.log("✅ WebSocket connected successfully");
                 document.getElementById('wsStatus').innerHTML = 'Connected';
                 document.getElementById('wsStatus').className = 'badge bg-success';
+                document.getElementById('wsStatusIndicator').className = 'status-indicator status-online';
                 reconnectAttempts = 0;
             };
             
             ws.onclose = (event) => {
-                console.log(`WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+                console.log(`❌ WebSocket disconnected. Code: ${event.code}, Reason: ${event.reason}`);
                 document.getElementById('wsStatus').innerHTML = 'Disconnected';
                 document.getElementById('wsStatus').className = 'badge bg-danger';
+                document.getElementById('wsStatusIndicator').className = 'status-indicator status-offline';
+                document.getElementById('esp32Status').innerHTML = 'Unknown';
                 
                 reconnectAttempts++;
                 let delay = Math.min(5000, 1000 * reconnectAttempts);
-                console.log(`Reconnecting in ${delay/1000} seconds...`);
+                console.log(`🔄 Reconnecting in ${delay/1000} seconds...`);
                 setTimeout(connectWebSocket, delay);
             };
             
             ws.onerror = (error) => {
-                console.error("WebSocket error:", error);
+                console.error("❌ WebSocket error:", error);
+                document.getElementById('wsStatus').innerHTML = 'Error';
+                document.getElementById('wsStatus').className = 'badge bg-danger';
             };
             
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log("Received data:", data.type);
+                    console.log("📨 Received data type:", data.type);
                     
                     if (data.type === 'init') {
                         updateSensors(data.data);
                         updateRecords(data.records);
+                        if (data.data.test_state !== undefined) {
+                            updateTestState(data.data.test_state);
+                        }
+                        if (data.esp32_connected) {
+                            document.getElementById('esp32Status').innerHTML = '<span class="text-success">Online</span>';
+                        } else {
+                            document.getElementById('esp32Status').innerHTML = '<span class="text-danger">Offline</span>';
+                        }
                     } else if (data.type === 'sensor_update') {
                         updateSensors(data.data);
                         document.getElementById('lastUpdate').textContent = data.timestamp;
+                        if (data.data.test_state !== undefined) {
+                            updateTestState(data.data.test_state);
+                        }
+                        if (data.data.do !== -1 || data.data.ph !== -1) {
+                            document.getElementById('esp32Status').innerHTML = '<span class="text-success">Online</span>';
+                        }
                     } else if (data.type === 'new_record') {
                         updateRecords(data.records);
-                        document.getElementById('testStatus').innerHTML = '<div class="alert alert-success">Test complete! New record saved.</div>';
-                        setTimeout(() => { document.getElementById('testStatus').innerHTML = ''; }, 5000);
+                        document.getElementById('testStatus').innerHTML = '<div class="alert alert-success">✅ Test complete! New record saved.</div>';
+                        setTimeout(() => { 
+                            document.getElementById('testStatus').innerHTML = ''; 
+                            document.getElementById('testProgress').style.display = 'none';
+                        }, 5000);
+                        // Reset buttons
+                        const startBtn = document.getElementById('startTestBtn');
+                        const cancelBtn = document.getElementById('cancelTestBtn');
+                        startBtn.disabled = false;
+                        startBtn.innerHTML = '🚀 START TESTING';
+                        cancelBtn.style.display = 'none';
+                        cancelBtn.disabled = false;
+                        cancelBtn.innerHTML = '🛑 CANCEL TEST';
+                        testActive = false;
                     } else if (data.type === 'test_started') {
                         console.log("Test started confirmation received");
+                        if (data.status === 'error') {
+                            document.getElementById('testStatus').innerHTML = `<div class="alert alert-danger">❌ ${data.message}</div>`;
+                            setTimeout(() => { document.getElementById('testStatus').innerHTML = ''; }, 5000);
+                            document.getElementById('startTestBtn').disabled = false;
+                            document.getElementById('startTestBtn').innerHTML = '🚀 START TESTING';
+                            document.getElementById('cancelTestBtn').style.display = 'none';
+                            testActive = false;
+                        } else {
+                            document.getElementById('testStatus').innerHTML = '<div class="alert alert-info">✅ Test started! Follow the sequence...</div>';
+                            showTestProgress();
+                        }
+                    } else if (data.type === 'test_complete') {
+                        document.getElementById('testStatus').innerHTML = '<div class="alert alert-success">✅ Test sequence completed!</div>';
+                        document.getElementById('testProgress').style.display = 'none';
+                        // Reset buttons
+                        const startBtn = document.getElementById('startTestBtn');
+                        const cancelBtn = document.getElementById('cancelTestBtn');
+                        startBtn.disabled = false;
+                        startBtn.innerHTML = '🚀 START TESTING';
+                        cancelBtn.style.display = 'none';
+                        cancelBtn.disabled = false;
+                        cancelBtn.innerHTML = '🛑 CANCEL TEST';
+                        testActive = false;
+                        setTimeout(() => { document.getElementById('testStatus').innerHTML = ''; }, 5000);
+                    } else if (data.type === 'test_cancelled') {
+                        console.log("Test cancelled:", data);
+                        if (data.status === 'success') {
+                            document.getElementById('testStatus').innerHTML = '<div class="alert alert-warning">🛑 Test cancelled by user!</div>';
+                        } else {
+                            document.getElementById('testStatus').innerHTML = `<div class="alert alert-danger">❌ ${data.message}</div>`;
+                        }
+                        // Reset buttons
+                        const startBtn = document.getElementById('startTestBtn');
+                        const cancelBtn = document.getElementById('cancelTestBtn');
+                        startBtn.disabled = false;
+                        startBtn.innerHTML = '🚀 START TESTING';
+                        cancelBtn.style.display = 'none';
+                        cancelBtn.disabled = false;
+                        cancelBtn.innerHTML = '🛑 CANCEL TEST';
+                        document.getElementById('testProgress').style.display = 'none';
+                        testActive = false;
+                        setTimeout(() => { document.getElementById('testStatus').innerHTML = ''; }, 5000);
+                    } else if (data.type === 'esp32_status') {
+                        if (data.connected) {
+                            document.getElementById('esp32Status').innerHTML = '<span class="text-success">Online</span>';
+                        } else {
+                            document.getElementById('esp32Status').innerHTML = '<span class="text-danger">Offline</span>';
+                        }
                     }
                 } catch (e) {
                     console.error("Error parsing message:", e);
                 }
             };
+        }
+        
+        function updateTestState(state) {
+            const testProgressDiv = document.getElementById('testProgress');
+            const testProgressBar = document.getElementById('testProgressBar');
+            const testStatus = document.getElementById('testStatus');
+            
+            switch(state) {
+                case 1:
+                    testStatus.innerHTML = '<div class="alert alert-info">📍 Step 1: Turning on sensors...</div>';
+                    updateTestProgress(10);
+                    break;
+                case 2:
+                    testStatus.innerHTML = '<div class="alert alert-info">📍 Step 2: Turning on water pump...</div>';
+                    updateTestProgress(20);
+                    break;
+                case 3:
+                    testStatus.innerHTML = '<div class="alert alert-info">📍 Step 3: Waiting for water detection...</div>';
+                    updateTestProgress(30);
+                    break;
+                case 4:
+                    testStatus.innerHTML = '<div class="alert alert-info">📍 Step 4: Stabilizing sensors (10 minutes)...</div>';
+                    updateTestProgress(50);
+                    break;
+                case 5:
+                    testStatus.innerHTML = '<div class="alert alert-info">📍 Step 5: Recording sensor data...</div>';
+                    updateTestProgress(80);
+                    break;
+                case 6:
+                    testStatus.innerHTML = '<div class="alert alert-info">📍 Step 6: Turning off sensors...</div>';
+                    updateTestProgress(90);
+                    break;
+                case 7:
+                    testStatus.innerHTML = '<div class="alert alert-info">📍 Step 7: Draining water...</div>';
+                    updateTestProgress(95);
+                    break;
+                default:
+                    if (state === 0 && testProgressDiv.style.display === 'block') {
+                        testProgressDiv.style.display = 'none';
+                    }
+                    break;
+            }
+        }
+        
+        function updateTestProgress(percent) {
+            const testProgressDiv = document.getElementById('testProgress');
+            const testProgressBar = document.getElementById('testProgressBar');
+            if (testProgressDiv.style.display !== 'block') {
+                testProgressDiv.style.display = 'block';
+            }
+            testProgressBar.style.width = percent + '%';
+            testProgressBar.innerHTML = percent + '%';
+        }
+        
+        function showTestProgress() {
+            const testProgressDiv = document.getElementById('testProgress');
+            testProgressDiv.style.display = 'block';
+            const testProgressBar = document.getElementById('testProgressBar');
+            testProgressBar.style.width = '5%';
+            testProgressBar.innerHTML = '5%';
         }
         
         function formatValue(value, decimals = 2) {
@@ -268,22 +432,29 @@
                 document.getElementById('wlVal').className = 'sensor-value';
             }
             
-            document.getElementById('wlProgress').style.width = data.water_percent + '%';
-            document.getElementById('waterDetect').innerHTML = data.water_detected ? '<span class="badge bg-success">YES</span>' : '<span class="badge bg-secondary">No</span>';
+            const waterPercent = data.water_percent || 0;
+            document.getElementById('wlProgress').style.width = waterPercent + '%';
+            document.getElementById('wlProgress').innerHTML = Math.round(waterPercent) + '%';
+            document.getElementById('waterDetect').innerHTML = data.water_detected ? '<span class="badge bg-success">YES ✅</span>' : '<span class="badge bg-secondary">No ❌</span>';
         }
         
         function updateRecords(records) {
             const container = document.getElementById('recordsContainer');
             if (!records || records.length === 0) {
-                container.innerHTML = '<div class="text-center text-muted">No records yet</div>';
+                container.innerHTML = '<div class="text-center text-muted">📭 No records yet</div>';
                 return;
             }
             
-            let html = '<div class="table-responsive"><table class="table table-sm">';
-            html += '<thead><tr><th>Time</th><th>DO</th><th>Temp</th><th>pH</th><th>TDS</th><th>Turb</th><th>NH4</th><th>Weight</th><th>Water</th></tr></thead><tbody>';
+            let html = '<div class="table-responsive"><table class="table table-sm table-hover">';
+            html += '<thead class="table-dark"><tr>';
+            html += '<th>Time</th><th>DO (mg/L)</th><th>Temp (°C)</th><th>pH</th><th>TDS (ppm)</th><th>Turb (NTU)</th><th>NH₄⁺ (mg/L)</th><th>Weight (g)</th><th>Water (cm)</th>';
+            html += '</tr></thead><tbody>';
             
             records.forEach(rec => {
-                let time = rec.timestamp.split('T')[1] || rec.timestamp;
+                let time = rec.timestamp;
+                if (time.includes('T')) {
+                    time = time.split('T')[1].substring(0, 8);
+                }
                 let doVal = rec.do === -1 ? '--' : rec.do.toFixed(2);
                 let tempVal = rec.temperature === -1 ? '--' : rec.temperature.toFixed(1);
                 let phVal = rec.ph === -1 ? '--' : rec.ph.toFixed(2);
@@ -294,7 +465,7 @@
                 let wlVal = rec.water_level === -1 ? '--' : rec.water_level.toFixed(1);
                 
                 html += `<tr>
-                    <td><small>${time.substring(0,8)}</small></td>
+                    <td><small>${time}</small></td>
                     <td>${doVal}</td>
                     <td>${tempVal}</td>
                     <td>${phVal}</td>
@@ -312,40 +483,90 @@
         
         async function startTest() {
             const btn = document.getElementById('startTestBtn');
-            btn.disabled = true;
-            btn.innerHTML = 'Testing...';
-            document.getElementById('testStatus').innerHTML = '<div class="alert alert-info">Test started! Follow the sequence...</div>';
+            const cancelBtn = document.getElementById('cancelTestBtn');
             
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({type: 'start_test'}));
-                console.log("Start test command sent");
-            } else {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
                 console.error("WebSocket not connected");
-                document.getElementById('testStatus').innerHTML = '<div class="alert alert-danger">Cannot start test: ESP32 not connected!</div>';
+                document.getElementById('testStatus').innerHTML = '<div class="alert alert-danger">❌ Cannot start test: WebSocket not connected!</div>';
+                setTimeout(() => { document.getElementById('testStatus').innerHTML = ''; }, 5000);
+                return;
             }
             
-            setTimeout(() => {
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Testing...';
+            cancelBtn.style.display = 'inline-block';
+            testActive = true;
+            document.getElementById('testStatus').innerHTML = '<div class="alert alert-info">🚀 Starting test sequence...</div>';
+            
+            try {
+                ws.send(JSON.stringify({type: 'start_test'}));
+                console.log("📤 Start test command sent");
+            } catch (error) {
+                console.error("Failed to send command:", error);
+                document.getElementById('testStatus').innerHTML = '<div class="alert alert-danger">❌ Failed to send start command!</div>';
                 btn.disabled = false;
-                btn.innerHTML = 'START TESTING';
-            }, 3000);
+                btn.innerHTML = '🚀 START TESTING';
+                cancelBtn.style.display = 'none';
+                testActive = false;
+                setTimeout(() => { document.getElementById('testStatus').innerHTML = ''; }, 5000);
+                return;
+            }
         }
         
-        // Check WebSocket connection status periodically
+        async function cancelTest() {
+            const btn = document.getElementById('startTestBtn');
+            const cancelBtn = document.getElementById('cancelTestBtn');
+            
+            if (!testActive) {
+                console.log("No active test to cancel");
+                return;
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error("WebSocket not connected");
+                document.getElementById('testStatus').innerHTML = '<div class="alert alert-danger">❌ Cannot cancel: WebSocket not connected!</div>';
+                return;
+            }
+            
+            cancelBtn.disabled = true;
+            cancelBtn.innerHTML = '⏳ Cancelling...';
+            document.getElementById('testStatus').innerHTML = '<div class="alert alert-warning">🛑 Cancelling test sequence...</div>';
+            
+            try {
+                ws.send(JSON.stringify({type: 'cancel_test'}));
+                console.log("📤 Cancel test command sent");
+            } catch (error) {
+                console.error("Failed to send cancel command:", error);
+                document.getElementById('testStatus').innerHTML = '<div class="alert alert-danger">❌ Failed to send cancel command!</div>';
+                cancelBtn.disabled = false;
+                cancelBtn.innerHTML = '🛑 CANCEL TEST';
+            }
+        }
+        
+        // Check connection status periodically
         setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 document.getElementById('wsStatus').innerHTML = 'Connected';
                 document.getElementById('wsStatus').className = 'badge bg-success';
+                document.getElementById('wsStatusIndicator').className = 'status-indicator status-online';
+                document.getElementById('startTestBtn').disabled = false;
             } else if (ws && ws.readyState === WebSocket.CONNECTING) {
                 document.getElementById('wsStatus').innerHTML = 'Connecting...';
                 document.getElementById('wsStatus').className = 'badge bg-warning';
+                document.getElementById('wsStatusIndicator').className = 'status-indicator status-connecting';
+                document.getElementById('startTestBtn').disabled = true;
             } else {
                 document.getElementById('wsStatus').innerHTML = 'Disconnected';
                 document.getElementById('wsStatus').className = 'badge bg-danger';
+                document.getElementById('wsStatusIndicator').className = 'status-indicator status-offline';
+                document.getElementById('startTestBtn').disabled = true;
+                document.getElementById('esp32Status').innerHTML = 'Unknown';
             }
         }, 1000);
         
+        // Initialize on page load
         window.onload = () => {
-            console.log("Page loaded, connecting to WebSocket...");
+            console.log("📄 Page loaded, connecting to WebSocket...");
             connectWebSocket();
         };
     </script>

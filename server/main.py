@@ -28,8 +28,8 @@ current_sensors = {
 async def lifespan(app: FastAPI):
     init_db()
     logger.info(f"FastAPI server started on port {HTTP_PORT}")
-    logger.info(f"ESP32 WebSocket port: {WS_PORT}")
-    logger.info(f"Web client WebSocket port: {WEB_WS_PORT}")
+    logger.info(f"ESP32 WebSocket endpoint: /esp32")
+    logger.info(f"Web client WebSocket endpoint: /ws")
     logger.info("=========================================")
     yield
 
@@ -43,14 +43,15 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def esp32_websocket(websocket: WebSocket):
     await websocket.accept()
     manager.set_esp32(websocket)
-    logger.info("ESP32 connected to WebSocket")
+    logger.info("✅ ESP32 connected to WebSocket")
     
     try:
         while True:
             data = await websocket.receive_text()
-            logger.debug(f"Received from ESP32: {data[:100]}...")  # Log first 100 chars
+            logger.info(f"📨 Received from ESP32: {data[:200]}...")
             
             try:
+                # Try to parse as JSON
                 sensor_data = json.loads(data)
                 
                 # Update current sensor values
@@ -60,7 +61,7 @@ async def esp32_websocket(websocket: WebSocket):
                 
                 # Check if this is a record request (test_state == 4)
                 if sensor_data.get('test_state') == 4:
-                    logger.info("Recording test data from ESP32")
+                    logger.info("💾 Recording test data from ESP32")
                     save_test_record(sensor_data)
                     await manager.broadcast({
                         'type': 'new_record',
@@ -77,17 +78,28 @@ async def esp32_websocket(websocket: WebSocket):
             except json.JSONDecodeError:
                 # Handle plain text commands
                 if data == "RECORD_CONFIRM":
-                    logger.info("Record confirmation received from ESP32")
+                    logger.info("✅ Record confirmation received from ESP32")
                 elif data == "TEST_COMPLETE":
-                    logger.info("Test complete from ESP32")
+                    logger.info("✅ Test complete from ESP32")
+                    await manager.broadcast({
+                        'type': 'test_complete',
+                        'message': 'Test sequence completed!'
+                    })
+                elif data == "TEST_CANCELLED":
+                    logger.info("🛑 Test cancelled by ESP32")
+                    await manager.broadcast({
+                        'type': 'test_cancelled',
+                        'status': 'success',
+                        'message': 'Test cancelled by user'
+                    })
                 else:
-                    logger.info(f"Plain text from ESP32: {data}")
+                    logger.info(f"📝 Plain text from ESP32: {data}")
                     
     except WebSocketDisconnect:
-        logger.warning("ESP32 disconnected")
+        logger.warning("⚠️ ESP32 disconnected")
         manager.clear_esp32()
     except Exception as e:
-        logger.error(f"Error in ESP32 WebSocket: {e}")
+        logger.error(f"❌ Error in ESP32 WebSocket: {e}")
         manager.clear_esp32()
 
 # ========== Web Client WebSocket Handler ==========
@@ -95,32 +107,78 @@ async def esp32_websocket(websocket: WebSocket):
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     manager.add_web(websocket)
-    logger.info(f"Web client connected. Total clients: {len(manager.web_clients)}")
+    logger.info(f"🌐 Web client connected. Total clients: {len(manager.web_clients)}")
     
     # Send initial data
     await websocket.send_json({
         'type': 'init',
         'data': current_sensors,
-        'records': get_last_5_records()
+        'records': get_last_5_records(),
+        'esp32_connected': manager.esp32_connected
     })
-    logger.info("Initial data sent to web client")
+    logger.info("📤 Initial data sent to web client")
     
     try:
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
-            logger.info(f"Received from web client: {msg.get('type')}")
+            logger.info(f"📨 Received from web client: {msg.get('type')}")
             
             if msg.get('type') == 'start_test':
-                logger.info("Start test command received from web client, forwarding to ESP32")
-                await manager.send_to_esp32("START_TEST")
-                await websocket.send_json({'type': 'test_started'})
+                logger.info("🚀 Start test command received from web client, forwarding to ESP32")
                 
+                if not manager.esp32_connected or manager.esp32 is None:
+                    logger.error("❌ Cannot start test: ESP32 not connected")
+                    await websocket.send_json({
+                        'type': 'test_started', 
+                        'status': 'error', 
+                        'message': 'ESP32 not connected'
+                    })
+                    continue
+                
+                success = await manager.send_to_esp32("START_TEST")
+                if success:
+                    await websocket.send_json({'type': 'test_started', 'status': 'success'})
+                    logger.info("✅ Start test command forwarded successfully")
+                else:
+                    await websocket.send_json({
+                        'type': 'test_started', 
+                        'status': 'error', 
+                        'message': 'Failed to send to ESP32'
+                    })
+                    logger.error("❌ Failed to send start test to ESP32")
+            
+            elif msg.get('type') == 'cancel_test':
+                logger.info("🛑 Cancel test command received from web client")
+                
+                if not manager.esp32_connected or manager.esp32 is None:
+                    await websocket.send_json({
+                        'type': 'test_cancelled',
+                        'status': 'error',
+                        'message': 'ESP32 not connected'
+                    })
+                    continue
+                
+                success = await manager.cancel_test()
+                if success:
+                    await websocket.send_json({
+                        'type': 'test_cancelled',
+                        'status': 'success',
+                        'message': 'Test cancelled successfully'
+                    })
+                    logger.info("✅ Cancel test command forwarded successfully")
+                else:
+                    await websocket.send_json({
+                        'type': 'test_cancelled',
+                        'status': 'error',
+                        'message': 'Failed to cancel test'
+                    })
+                    
     except WebSocketDisconnect:
         manager.remove_web(websocket)
-        logger.info(f"Web client disconnected. Total clients: {len(manager.web_clients)}")
+        logger.info(f"🌐 Web client disconnected. Total clients: {len(manager.web_clients)}")
     except Exception as e:
-        logger.error(f"Error in web WebSocket: {e}")
+        logger.error(f"❌ Error in web WebSocket: {e}")
         manager.remove_web(websocket)
 
 # ========== HTTP Endpoints ==========
@@ -131,7 +189,7 @@ async def get_index():
         with open(html_path, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     else:
-        logger.error(f"index.html not found at {html_path}")
+        logger.error(f"❌ index.html not found at {html_path}")
         return HTMLResponse(content="<h1>index.html not found</h1>", status_code=404)
 
 @app.get("/api/records")
@@ -150,5 +208,7 @@ async def get_status():
 # ========== Run Server ==========
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting server on 0.0.0.0:{HTTP_PORT}")
+    logger.info(f"🚀 Starting server on 0.0.0.0:{HTTP_PORT}")
+    logger.info(f"📡 WebSocket endpoint for ESP32: ws://0.0.0.0:{HTTP_PORT}/esp32")
+    logger.info(f"📡 WebSocket endpoint for Web: ws://0.0.0.0:{HTTP_PORT}/ws")
     uvicorn.run(app, host="0.0.0.0", port=HTTP_PORT, log_level="info")
